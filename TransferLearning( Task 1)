@@ -1,0 +1,127 @@
+#--------------------------------------------------------Creating the Architecture---------------------------------------------------------
+import pandas as pd
+import numpy as np
+import keras
+import matplotlib.pyplot as plt
+from keras.applications import MobileNet
+
+# MobileNet was designed to work on 224 x 224 pixel input images sizes
+img_rows, img_cols = 224, 224 
+
+# pre trained weights : create my model
+model = MobileNet(weights='imagenet')
+
+# Re-loads the MobileNet model without the top or FC layers
+MobileNet_Model = MobileNet(weights = 'imagenet', 
+                 include_top = False, 
+                 input_shape = (img_rows, img_cols, 3))
+
+# Here we freeze the last 4 layers 
+# Layers are set to trainable as True by default
+for layer in MobileNet_Model.layers:
+    layer.trainable = False
+    
+# Let's print our layers 
+for (i,layer) in enumerate(MobileNet_Model.layers):
+    print(str(i) + " "+ layer.__class__.__name__, layer.trainable)
+
+
+def FCHeadfunc(bottom_model, num_classes):
+    """creates the top or head of the model that will be 
+    placed ontop of the bottom layers"""
+
+    x= bottom_model.output
+    x= GlobalAveragePooling2D()(x)
+    x= Dense(1024,activation='relu')(x)
+    x= Dense(1024,activation='relu')(x)
+    x= Dense(512,activation='relu')(x)
+    x= Dense(num_classes,activation='softmax')(x)
+    return x
+
+from keras.models import Sequential
+from keras.layers import Dense, Dropout, Activation, Flatten, GlobalAveragePooling2D
+from keras.layers import Conv2D, MaxPooling2D, ZeroPadding2D
+from keras.layers.normalization import BatchNormalization
+from keras.models import Model
+
+# Set our class number 
+num_classes = 3
+
+FC_Head = FCHeadfunc(MobileNet_Model, num_classes)
+
+model = Model(inputs = MobileNet_Model.input, outputs = FC_Head)
+
+print(model.summary())
+
+from keras.preprocessing.image import ImageDataGenerator
+
+train_data_dir = ''
+validation_data_dir = ''
+
+# Let's use some data augmentaiton 
+train_datagen = ImageDataGenerator(preprocessing_function=preprocess_input)
+#     rescale=1./255,
+#      rotation_range=45,
+#      width_shift_range=0.3,
+#      height_shift_range=0.3,
+#      horizontal_flip=True,
+#      fill_mode='nearest')
+ 
+validation_datagen = ImageDataGenerator(rescale=1./255)
+ 
+# set our batch size (typically on most mid tier systems we'll use 16-32)
+batch_size = 32
+ 
+train_generator = train_datagen.flow_from_directory(
+        train_data_dir,
+        target_size=(img_rows, img_cols),
+        batch_size=batch_size,
+        class_mode='categorical',
+        shuffle=True)
+ 
+validation_generator = validation_datagen.flow_from_directory(
+        validation_data_dir,
+        target_size=(img_rows, img_cols),
+        batch_size=batch_size,
+        class_mode='categorical',
+        shuffle=True)
+
+from keras.optimizers import Adam
+from keras.callbacks import ModelCheckpoint, EarlyStopping
+
+                     
+checkpoint = ModelCheckpoint(".h5",
+                             monitor="val_loss",
+                             mode="min",
+                             save_best_only = True,
+                             verbose=1)
+
+earlystop = EarlyStopping(monitor = 'val_loss', 
+                          min_delta = 0, 
+                          patience = 3,
+                          verbose = 1,
+                          restore_best_weights = True)
+
+# we put our call backs into a callback list
+callbacks = [earlystop, checkpoint]
+
+# We use a very small learning rate 
+model.compile(loss = 'categorical_crossentropy',
+              optimizer = Adam(lr = 0.001),
+              metrics = ['accuracy'])
+
+# Enter the number of training and validation samples here
+nb_train_samples = 1097
+nb_validation_samples = 272
+
+# We only train 5 EPOCHS 
+epochs = 5
+batch_size = 16
+
+history = model.fit_generator(
+    train_generator,
+    steps_per_epoch = nb_train_samples // batch_size,
+    epochs = epochs,
+    callbacks = callbacks,
+    validation_data = validation_generator,
+    validation_steps = nb_validation_samples // batch_size)
